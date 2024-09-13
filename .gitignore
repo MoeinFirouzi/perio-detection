@@ -162,4 +162,9 @@ cython_debug/
 #.idea/
 
 # Dateset
-data*/
+data*
+
+
+# Results
+runs/
+yolo*
