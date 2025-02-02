@@ -163,6 +163,8 @@ cython_debug/
 
 # Dateset
 data*
+
+models/
 dataset/
 
 # Results
