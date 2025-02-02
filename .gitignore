@@ -163,7 +163,7 @@ cython_debug/
 
 # Dateset
 data*
-
+dataset/
 
 # Results
 runs/
