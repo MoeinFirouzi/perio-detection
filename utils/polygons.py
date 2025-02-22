@@ -258,7 +258,14 @@ def calculate_pairwise_distances(list1, list2):
 
 
 def plot_points_and_ratios(
-    list1, list2, list3, image, d1, d2, save_path="output.png", csv_path="ratios.csv"
+    list1,
+    list2,
+    list3,
+    image,
+    d1,
+    d2,
+    save_path="./outputs/",
+    csv_path="./outputs/ratios.csv",
 ):
     """
     Plots the points from three lists on an image, displays the ratio of pairwise distances (d1/d2),
@@ -350,7 +357,7 @@ def filter_small_polygons(polygons, relative_threshold=0.3):
 
     Parameters:
         polygons (list of shapely.geometry.Polygon): List of polygons to filter.
-        relative_threshold (float): The fraction (between 0 and 1) of the largest polygon's area that 
+        relative_threshold (float): The fraction (between 0 and 1) of the largest polygon's area that
                                     a polygon must have to be kept. Default is 0.3 (30%).
 
     Returns:
@@ -359,13 +366,14 @@ def filter_small_polygons(polygons, relative_threshold=0.3):
     """
     if not polygons:
         return []
-    
+
     # Determine the area of the largest polygon in the list.
     max_area = max(polygon.area for polygon in polygons)
     threshold_area = relative_threshold * max_area
 
     # Filter out polygons that are smaller than the threshold_area.
-    filtered_polygons = [polygon for polygon in polygons if polygon.area >= threshold_area]
-    
-    return filtered_polygons
+    filtered_polygons = [
+        polygon for polygon in polygons if polygon.area >= threshold_area
+    ]
 
+    return filtered_polygons
