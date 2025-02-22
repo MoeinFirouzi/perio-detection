@@ -170,3 +170,4 @@ dataset/
 # Results
 runs/
 yolo*
+outputs/
