@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import pandas as pd
 
 from shapely.geometry import Polygon, LineString, MultiPoint, Point
 from sklearn.decomposition import PCA
@@ -7,9 +8,7 @@ import matplotlib.pyplot as plt
 from PIL import Image
 
 
-def get_obj_polygon(
-    results, image, target_classes=["CEJ", "bone_level", "tooth"]
-):
+def get_obj_polygon(results, image, target_classes=["CEJ", "bone_level", "tooth"]):
     """
     Extracts polygons for specific target classes (e.g., "CEJ", "bone_level")
     from YOLO segmentation results and returns them in left-to-right order.
@@ -258,14 +257,19 @@ def calculate_pairwise_distances(list1, list2):
     return distances
 
 
-def plot_points_and_ratios(list1, list2, list3, image, d1, d2):
+def plot_points_and_ratios(
+    list1, list2, list3, image, d1, d2, save_path="output.png", csv_path="ratios.csv"
+):
     """
-    Plots the points from three lists on an image and displays the ratio of pairwise distances (d1/d2).
+    Plots the points from three lists on an image, displays the ratio of pairwise distances (d1/d2),
+    and saves the ratios in a CSV file.
 
     Parameters:
-        list1, list2, list3 (list of shapely.geometry.Point): Lists of points.
+        list1, list2, list3 (list of shapely.geometry.Point or None): Lists of points.
         image (PIL.Image or np.ndarray): The background image.
-        d1, d2 (list of float): Pairwise distances calculated for list1/list2 and list2/list3.
+        d1, d2 (list of float or None): Pairwise distances calculated for list1/list2 and list2/list3.
+        save_path (str): Path to save the image.
+        csv_path (str): Path to save the CSV file.
     """
     # Ensure image is a PIL image
     if isinstance(image, np.ndarray):
@@ -273,9 +277,13 @@ def plot_points_and_ratios(list1, list2, list3, image, d1, d2):
     else:
         img = image  # Use as-is if already a PIL image
 
-    # Calculate the ratios d1/d2
+    # Calculate the ratios d1/d2, handling None values
     ratios = [
-        d1_value / d2_value if d2_value != 0 else 0
+        (
+            None
+            if d1_value is None or d2_value is None
+            else (d1_value / d2_value if d2_value != 0 else 0)
+        )
         for d1_value, d2_value in zip(d1, d2)
     ]
 
@@ -283,37 +291,48 @@ def plot_points_and_ratios(list1, list2, list3, image, d1, d2):
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.imshow(img)
 
-    # Plot the points from list1, list2, list3
+    # Plot the points from list1, list2, list3 (skip None values)
     for i, point in enumerate(list1):
-        ax.plot(point.x, point.y, "bo", label=f"Point1-{i+1}")
+        if point is not None:
+            ax.plot(point.x, point.y, "bo", label=f"Point1-{i+1}")
 
     for i, point in enumerate(list2):
-        ax.plot(point.x, point.y, "go", label=f"Point2-{i+1}")
+        if point is not None:
+            ax.plot(point.x, point.y, "go", label=f"Point2-{i+1}")
 
     for i, point in enumerate(list3):
-        ax.plot(point.x, point.y, "ro", label=f"Point3-{i+1}")
+        if point is not None:
+            ax.plot(point.x, point.y, "ro", label=f"Point3-{i+1}")
 
     # Annotate distances and ratios between points
     for i, (d1_value, d2_value, ratio) in enumerate(zip(d1, d2, ratios)):
-        # ax.text(list1[i].x, list1[i].y, f"D1: {d1_value:.2f}", fontsize=12, color='blue', ha='right')
-        # ax.text(list2[i].x, list2[i].y, f"D2: {d2_value:.2f}", fontsize=12, color='green', ha='right')
-        ax.text(
-            list2[i].x,
-            list2[i].y - 10,
-            f"Ratio: {ratio:.2f}",
-            fontsize=12,
-            color="red",
-            ha="center",
-        )
+        if list2[i] is not None:
+            # Format the ratio display; if ratio is None, show "N/A"
+            text = f"Ratio: {ratio:.2f}" if ratio is not None else "Ratio: N/A"
+            ax.text(
+                list2[i].x, list2[i].y - 10, text, fontsize=12, color="red", ha="center"
+            )
 
-    # ax.legend()
     ax.set_xlim(0, img.width)
     ax.set_ylim(img.height, 0)  # Invert y-axis to align with image coordinates
     ax.axis(False)
-    plt.show()
+
+    # Save the plot as an image
+    plt.savefig(save_path, bbox_inches="tight", dpi=300)
+    plt.close(fig)
+    # print(f"Image saved to {save_path}")
+
+    # Save ratios to CSV file
+    filename = save_path.split("/")[-1].split(".")[0]
+    data = {"filename": [filename], "ratios": [ratios]}
+    df = pd.DataFrame(data)
+    df.to_csv(
+        csv_path, mode="a", header=not pd.io.common.file_exists(csv_path), index=False
+    )
+    # print(f"Ratios saved to {csv_path}")
 
 
-def process_and_plot(list1, list2, list3, image):
+def process_and_plot(list1, list2, list3, image, save_path):
     """
     Process the three point lists, calculate distances and ratios, and plot them on an image.
     """
@@ -322,4 +341,31 @@ def process_and_plot(list1, list2, list3, image):
     d2 = calculate_pairwise_distances(list2, list3)
 
     # Plot the points and distances on the image
-    plot_points_and_ratios(list1, list2, list3, image, d1, d2)
+    plot_points_and_ratios(list1, list2, list3, image, d1, d2, save_path=save_path)
+
+
+def filter_small_polygons(polygons, relative_threshold=0.3):
+    """
+    Filters out polygons with area smaller than a specified percentage of the largest polygon's area.
+
+    Parameters:
+        polygons (list of shapely.geometry.Polygon): List of polygons to filter.
+        relative_threshold (float): The fraction (between 0 and 1) of the largest polygon's area that 
+                                    a polygon must have to be kept. Default is 0.3 (30%).
+
+    Returns:
+        List of shapely.geometry.Polygon: Filtered polygons that have an area larger than or equal to
+                                          relative_threshold * (max polygon area).
+    """
+    if not polygons:
+        return []
+    
+    # Determine the area of the largest polygon in the list.
+    max_area = max(polygon.area for polygon in polygons)
+    threshold_area = relative_threshold * max_area
+
+    # Filter out polygons that are smaller than the threshold_area.
+    filtered_polygons = [polygon for polygon in polygons if polygon.area >= threshold_area]
+    
+    return filtered_polygons
+
