@@ -7,21 +7,26 @@ import matplotlib.pyplot as plt
 from PIL import Image
 
 
-def get_obj_polygon(results, image, target_classes=["CEJ", "bone_level", "tooth"]):
+def get_obj_polygon(
+    results, image, target_classes=["CEJ", "bone_level", "tooth"]
+):
     """
     Extracts polygons for specific target classes (e.g., "CEJ", "bone_level")
-    from YOLO segmentation results.
+    from YOLO segmentation results and returns them in left-to-right order.
 
     Parameters:
-        results (list): YOLO segmentation results containing masks and class
-                        predictions.
-        image (numpy.ndarray): Original image for resizing masks.
-        target_classes (str or list): The name(s) of the class(es) to extract
-                                      polygons for. Default is ["CEJ"].
+        results (list):
+            YOLO segmentation results containing masks and class predictions.
+        image (numpy.ndarray):
+            Original image for resizing masks.
+        target_classes (str or list):
+            The name(s) of the class(es) to extract polygons for.
+            Default is ["CEJ", "bone_level", "tooth"].
 
     Returns:
-        dict: A dictionary where keys are target classes and values are lists
-              of Shapely Polygons for each class.
+        dict:
+            A dictionary where keys are target classes and values are lists
+            of Shapely Polygons for each class sorted from left to right.
     """
     # Validate inputs
     if not results or not isinstance(results, list):
@@ -70,6 +75,13 @@ def get_obj_polygon(results, image, target_classes=["CEJ", "bone_level", "tooth"
                     if len(contour) >= 3:
                         polygon = Polygon(contour[:, 0, :])
                         polygons_by_class[target_class].append(polygon)
+
+    # Sort the polygons for each class in left-to-right order
+    # (using the minimum x-coordinate from polygon.bounds which returns (minx, miny, maxx, maxy))
+    for target_class in polygons_by_class:
+        polygons_by_class[target_class] = sorted(
+            polygons_by_class[target_class], key=lambda poly: poly.bounds[0]
+        )
 
     return polygons_by_class
 
@@ -225,17 +237,22 @@ def calculate_pairwise_distances(list1, list2):
     Calculates the Euclidean distance between corresponding points in two lists.
 
     Parameters:
-        list1 (list of shapely.geometry.Point): First list of points.
-        list2 (list of shapely.geometry.Point): Second list of points.
+        list1 (list of shapely.geometry.Point or None): First list of points.
+        list2 (list of shapely.geometry.Point or None): Second list of points.
 
     Returns:
-        List of distances (float values).
+        List of distances (float values) or None for any pair where one or both points are None.
     """
     if len(list1) != len(list2):
         raise ValueError("Both lists must have the same length.")
 
     distances = [
-        np.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2) for p1, p2 in zip(list1, list2)
+        (
+            None
+            if (p1 is None or p2 is None)
+            else np.sqrt((p2.x - p1.x) ** 2 + (p2.y - p1.y) ** 2)
+        )
+        for p1, p2 in zip(list1, list2)
     ]
 
     return distances
