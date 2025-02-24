@@ -4,18 +4,25 @@ from tqdm import tqdm
 from ultralytics import YOLO
 import argparse
 
+from utils.detectors import extract_bone_level, extract_cej, extract_tooth_root
+
 from utils.polygons import (
-    find_higher_intersections_for_shape,
-    find_lower_intersection,
-    find_lower_intersections_for_shape,
     get_major_axes,
     get_obj_polygon,
-    process_and_plot,
     filter_small_polygons,
+    calculate_ratios,
+    calculate_pairwise_distances,
+    save_ratios_to_csv,
+    plot_points_and_ratios,
 )
 
 
-def predict(image_dir: str, output_dir: str, tooth_detection_model: YOLO, cej_bone_detection_model: YOLO) -> None:
+def predict(
+    image_dir: str,
+    output_dir: str,
+    tooth_detection_model: YOLO,
+    cej_bone_detection_model: YOLO,
+) -> None:
     """
     Process all images in a directory, apply YOLO detection models, filter and process detected polygons,
     and save the resulting plots.
@@ -70,13 +77,18 @@ def predict(image_dir: str, output_dir: str, tooth_detection_model: YOLO, cej_bo
 
             # Calculate major axes and intersections
             major_axes = get_major_axes(tooth_polygons)
-            roots = find_lower_intersection(major_axes=major_axes, polygons=tooth_polygons)
-            cejs = find_lower_intersections_for_shape(axes=major_axes, polygon=cej_polygons[-1])
-            bone_levels = find_higher_intersections_for_shape(axes=major_axes, polygon=bone_polygons[-1])
+            roots = extract_tooth_root(major_axes=major_axes, polygons=tooth_polygons)
+            cejs = extract_cej(axes=major_axes, polygon=cej_polygons[-1])
+            bone_levels = extract_bone_level(axes=major_axes, polygon=bone_polygons[-1])
 
-            # Save the plotted output
-            save_path = os.path.join(output_dir, filename)
-            process_and_plot(cejs, bone_levels, roots, image, save_path=save_path)
+            d1 = calculate_pairwise_distances(cejs, bone_levels)
+            d2 = calculate_pairwise_distances(bone_levels, roots)
+
+            ratios = calculate_ratios(d1, d2)
+            save_ratios_to_csv(ratios, filename)
+            plot_points_and_ratios(
+                cejs, bone_levels, roots, image, ratios, save_path=f"./outputs/{filename}"
+            )
 
         except Exception as e:
             print(f"Error processing {filename}: {e}")

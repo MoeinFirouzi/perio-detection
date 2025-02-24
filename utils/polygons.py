@@ -161,6 +161,117 @@ def get_major_axes(polygons):
     return major_axes
 
 
+def get_minor_axes(polygons):
+    """
+    Given a list of polygons, return a list of their minor axes as LineStrings.
+
+    Parameters:
+        polygons (list of shapely.geometry.Polygon): List of polygons.
+
+    Returns:
+        List of shapely.geometry.LineString: Minor axes of the polygons.
+    """
+    minor_axes = []
+
+    for polygon in polygons:
+        # Get exterior coordinates (excluding the duplicate last point)
+        x, y = polygon.exterior.xy
+        points = np.column_stack((x[:-1], y[:-1]))
+
+        # Compute centroid
+        centroid = np.array([polygon.centroid.x, polygon.centroid.y])
+
+        # Apply PCA to get principal components
+        pca = PCA(n_components=2)
+        pca.fit(points - centroid)  # Center the points
+
+        # Get minor axis direction using the second principal component
+        minor_axis_dir = pca.components_[1]
+        minor_length = pca.explained_variance_[1] ** 0.5  # Scale by variance
+
+        # Compute minor axis line (extend it for visualization)
+        minor_axis_start = centroid - minor_axis_dir * minor_length * 100
+        minor_axis_end = centroid + minor_axis_dir * minor_length * 100
+
+        # Convert to LineString
+        minor_axis_line = LineString([minor_axis_start, minor_axis_end])
+        minor_axes.append(minor_axis_line)
+
+    return minor_axes
+
+
+def get_single_major_axis(polygon):
+    """
+    Given a Shapely polygon, return its major axis as a LineString.
+
+    Parameters:
+        polygon (shapely.geometry.Polygon): The polygon for which to compute the major axis.
+
+    Returns:
+        shapely.geometry.LineString: The major axis of the polygon.
+    """
+    # Get exterior coordinates, excluding the duplicate last point
+    x, y = polygon.exterior.xy
+    points = np.column_stack((x[:-1], y[:-1]))
+
+    # Compute centroid
+    centroid = np.array([polygon.centroid.x, polygon.centroid.y])
+
+    # Apply PCA to get principal components
+    pca = PCA(n_components=2)
+    pca.fit(points - centroid)  # Center the points
+
+    # Get major axis direction and length
+    major_axis_dir = pca.components_[0]
+    major_length = pca.explained_variance_[0] ** 0.5
+
+    # Extend the line for visualization purposes
+    major_axis_start = centroid - major_axis_dir * major_length * 100
+    major_axis_end = centroid + major_axis_dir * major_length * 100
+
+    return LineString([major_axis_start, major_axis_end])
+
+
+def get_minor_axis_from_point(polygon, given_point):
+    """
+    Given a Shapely polygon, return its minor axis as a LineString drawn from a given point.
+
+    Parameters:
+        polygon (shapely.geometry.Polygon): The polygon for which to compute the minor axis.
+        given_point (tuple or shapely.geometry.Point): The point from which to draw the minor axis.
+
+    Returns:
+        shapely.geometry.LineString: The minor axis of the polygon, anchored at the given point.
+    """
+    # Get exterior coordinates, excluding the duplicate last point.
+    x, y = polygon.exterior.xy
+    points = np.column_stack((x[:-1], y[:-1]))
+
+    # Compute the polygon's centroid for PCA computation.
+    centroid = np.array([polygon.centroid.x, polygon.centroid.y])
+
+    # Apply PCA on the centered points.
+    pca = PCA(n_components=2)
+    pca.fit(points - centroid)
+
+    # Get the minor axis direction and its length.
+    minor_axis_dir = pca.components_[1]
+    minor_length = pca.explained_variance_[1] ** 0.5
+
+    # Convert the given_point to a numpy array.
+    if isinstance(given_point, Point):
+        origin = np.array([given_point.x, given_point.y])
+    else:
+        origin = np.array(given_point)
+
+    # Extend the line from the given point for visualization.
+    extension_factor = 100  # Adjust the factor as needed.
+    minor_axis_start = origin - minor_axis_dir * minor_length * extension_factor
+    minor_axis_end = origin + minor_axis_dir * minor_length * extension_factor
+
+    return LineString([minor_axis_start, minor_axis_end])
+
+
 def find_lower_intersections_for_shape(polygon, axes):
     """
     Finds the lower (higher y-coordinate) intersection points of multiple axes with a single polygon.
@@ -257,98 +368,116 @@ def calculate_pairwise_distances(list1, list2):
     return distances
 
 
-def plot_points_and_ratios(
-    list1,
-    list2,
-    list3,
-    image,
-    d1,
-    d2,
-    save_path="./outputs/",
-    csv_path="./outputs/ratios.csv",
-):
+def calculate_ratios(d1, d2):
     """
-    Plots the points from three lists on an image, displays the ratio of pairwise distances (d1/d2),
-    and saves the ratios in a CSV file.
+    Calculate ratios from two lists of distances.
+
+    Parameters:
+        d1, d2 (list of float or None): Lists of distances.
+
+    Returns:
+        list: A list of ratios computed as d1_value/d2_value. If either value is None
+              or d2_value is zero, returns None or 0 accordingly.
+    """
+    ratios = [
+        (
+            None
+            if d1_val is None or d2_val is None
+            else (d1_val / d2_val if d2_val != 0 else 0)
+        )
+        for d1_val, d2_val in zip(d1, d2)
+    ]
+    return ratios
+
+
+def save_ratios_to_csv(ratios, image_filename, csv_path="./outputs/ratios.csv"):
+    """
+    Save the calculated ratios along with the image filename to a CSV file.
+
+    Parameters:
+        ratios (list): List of ratio values.
+        image_filename (str): The filename of the image.
+        csv_path (str): Path to the CSV file.
+    """
+    data = {"filename": [image_filename], "ratios": [ratios]}
+    df = pd.DataFrame(data)
+    # Append to CSV; create header only if file doesn't exist
+    df.to_csv(
+        csv_path, mode="a", header=not pd.io.common.file_exists(csv_path), index=False
+    )
+
+
+def plot_points_on_image(list1, list2, list3, image, ratios):
+    """
+    Plot points from three lists on an image and annotate the points from list2 with ratios.
 
     Parameters:
         list1, list2, list3 (list of shapely.geometry.Point or None): Lists of points.
         image (PIL.Image or np.ndarray): The background image.
-        d1, d2 (list of float or None): Pairwise distances calculated for list1/list2 and list2/list3.
-        save_path (str): Path to save the image.
-        csv_path (str): Path to save the CSV file.
+        ratios (list): List of ratios to annotate near the points from list2.
+
+    Returns:
+        matplotlib.figure.Figure: The created figure.
     """
-    # Ensure image is a PIL image
+    # Ensure image is a PIL Image
     if isinstance(image, np.ndarray):
-        img = Image.fromarray(image)  # Convert NumPy array to PIL image
+        img = Image.fromarray(image)
     else:
-        img = image  # Use as-is if already a PIL image
+        img = image
 
-    # Calculate the ratios d1/d2, handling None values
-    ratios = [
-        (
-            None
-            if d1_value is None or d2_value is None
-            else (d1_value / d2_value if d2_value != 0 else 0)
-        )
-        for d1_value, d2_value in zip(d1, d2)
-    ]
-
-    # Plot the image
     fig, ax = plt.subplots(figsize=(8, 8))
     ax.imshow(img)
 
-    # Plot the points from list1, list2, list3 (skip None values)
+    # Plot points for each list (skipping None values)
     for i, point in enumerate(list1):
         if point is not None:
             ax.plot(point.x, point.y, "bo", label=f"Point1-{i+1}")
-
     for i, point in enumerate(list2):
         if point is not None:
             ax.plot(point.x, point.y, "go", label=f"Point2-{i+1}")
-
     for i, point in enumerate(list3):
         if point is not None:
             ax.plot(point.x, point.y, "ro", label=f"Point3-{i+1}")
 
-    # Annotate distances and ratios between points
-    for i, (d1_value, d2_value, ratio) in enumerate(zip(d1, d2, ratios)):
-        if list2[i] is not None:
-            # Format the ratio display; if ratio is None, show "N/A"
+    # Annotate each list2 point with its corresponding ratio
+    for i, (point, ratio) in enumerate(zip(list2, ratios)):
+        if point is not None:
             text = f"Ratio: {ratio:.2f}" if ratio is not None else "Ratio: N/A"
-            ax.text(
-                list2[i].x, list2[i].y - 10, text, fontsize=12, color="red", ha="center"
-            )
+            ax.text(point.x, point.y - 10, text, fontsize=12, color="red", ha="center")
 
+    # Set plot limits based on the image size
     ax.set_xlim(0, img.width)
-    ax.set_ylim(img.height, 0)  # Invert y-axis to align with image coordinates
-    ax.axis(False)
+    ax.set_ylim(img.height, 0)  # Invert y-axis for image coordinates
+    ax.axis("off")
 
-    # Save the plot as an image
-    plt.savefig(save_path, bbox_inches="tight", dpi=300)
+    return fig
+
+
+def plot_points_and_ratios(
+    cejs,
+    bones,
+    roots,
+    image,
+    ratios,
+    save_path="./outputs/plot.png",
+):
+    """
+    Process the given points, calculate ratios from pairwise distances, plot the points with ratio annotations,
+    and save both the resulting plot and the ratio data.
+
+    Parameters:
+        list1, list2, list3 (list of shapely.geometry.Point or None): Lists of points.
+        image (PIL.Image or np.ndarray): The background image.
+        d1, d2 (list of float or None): Lists of distances.
+        save_path (str): Path to save the output image.
+        csv_path (str): Path to save the CSV file.
+    """
+    # Calculate ratios using the helper function
+
+    # Plot the points and annotate them with the ratios
+    fig = plot_points_on_image(cejs, bones, roots, image, ratios)
+    fig.savefig(save_path, bbox_inches="tight", dpi=300)
     plt.close(fig)
-    # print(f"Image saved to {save_path}")
-
-    # Save ratios to CSV file
-    filename = save_path.split("/")[-1].split(".")[0]
-    data = {"filename": [filename], "ratios": [ratios]}
-    df = pd.DataFrame(data)
-    df.to_csv(
-        csv_path, mode="a", header=not pd.io.common.file_exists(csv_path), index=False
-    )
-    # print(f"Ratios saved to {csv_path}")
-
-
-def process_and_plot(list1, list2, list3, image, save_path):
-    """
-    Process the three point lists, calculate distances and ratios, and plot them on an image.
-    """
-    # Calculate pairwise distances between the lists
-    d1 = calculate_pairwise_distances(list1, list2)
-    d2 = calculate_pairwise_distances(list2, list3)
-
-    # Plot the points and distances on the image
-    plot_points_and_ratios(list1, list2, list3, image, d1, d2, save_path=save_path)
 
 
 def filter_small_polygons(polygons, relative_threshold=0.3):
@@ -377,3 +506,81 @@ def filter_small_polygons(polygons, relative_threshold=0.3):
     ]
 
     return filtered_polygons
+
+
+def get_lowest_coordinate(polygon):
+    """
+    Given a Shapely polygon, return its lowest coordinate as a Shapely Point.
+    The lowest coordinate is defined as the coordinate with the minimum y-value.
+    In case of ties, the coordinate with the minimum x-value is chosen.
+
+    Parameters:
+        polygon (shapely.geometry.Polygon): A Shapely Polygon object.
+
+    Returns:
+        shapely.geometry.Point: The lowest coordinate (x, y) of the polygon.
+    """
+    # Get the exterior coordinates of the polygon.
+    coords = list(polygon.exterior.coords)
+    # Determine the coordinate with the smallest y value; if there's a tie, choose the smallest x.
+    lowest_coord = max(coords, key=lambda p: (p[1], p[0]))
+    return Point(lowest_coord)
+
+
+def get_parallel_major_axes(polygon, extension_factor=100, shift_ratio=0.4):
+    """
+    Given a Shapely polygon, compute its major axis using PCA, then create two lines parallel
+    to the major axis, shifted along the minor axis by a fraction (shift_ratio) of the polygon's width.
+    One line is shifted to one side and the other to the opposite side.
+
+    Parameters:
+        polygon (shapely.geometry.Polygon): The polygon for which to compute the axes.
+        extension_factor (float): Factor to extend the major axis for visualization.
+        shift_ratio (float): Fraction of the polygon's width along the minor axis to shift.
+
+    Returns:
+        tuple: Two shapely.geometry.LineString objects representing the left-shifted and right-shifted major axes.
+    """
+    # Get the exterior coordinates (exclude the duplicate last point)
+    x, y = polygon.exterior.xy
+    points = np.column_stack((x[:-1], y[:-1]))
+
+    # Compute the centroid as a numpy array
+    centroid = np.array([polygon.centroid.x, polygon.centroid.y])
+
+    # Center the points for PCA
+    centered_points = points - centroid
+
+    # Apply PCA to get principal components (axes)
+    pca = PCA(n_components=2)
+    pca.fit(centered_points)
+
+    # Major axis direction (first principal component) and minor axis direction (second principal component)
+    major_axis_dir = pca.components_[0]
+    minor_axis_dir = pca.components_[1]
+
+    # Calculate the polygon's width along the minor axis:
+    projections = centered_points.dot(minor_axis_dir)
+    width = projections.max() - projections.min()
+
+    # Calculate the offset distance (shift_ratio of the polygon's width)
+    offset = shift_ratio * width
+
+    # Determine the new "centroids" for the two parallel lines by shifting along the minor axis
+    left_centroid = centroid + minor_axis_dir * offset
+    right_centroid = centroid - minor_axis_dir * offset
+
+    # Use the square root of the explained variance along the major axis as a scale for visualization
+    major_length = np.sqrt(pca.explained_variance_[0])
+
+    # Compute endpoints for the two parallel lines along the major axis, anchored at the shifted centroids
+    left_line_start = left_centroid - major_axis_dir * major_length * extension_factor
+    left_line_end = left_centroid + major_axis_dir * major_length * extension_factor
+
+    right_line_start = right_centroid - major_axis_dir * major_length * extension_factor
+    right_line_end = right_centroid + major_axis_dir * major_length * extension_factor
+
+    left_line = LineString([left_line_start, left_line_end])
+    right_line = LineString([right_line_start, right_line_end])
+
+    return left_line, right_line
