@@ -532,6 +532,7 @@ def get_parallel_major_axes(polygon, extension_factor=100, shift_ratio=0.4):
     Given a Shapely polygon, compute its major axis using PCA, then create two lines parallel
     to the major axis, shifted along the minor axis by a fraction (shift_ratio) of the polygon's width.
     One line is shifted to one side and the other to the opposite side.
+    The function returns the two lines sorted by their average x coordinate (from left to right).
 
     Parameters:
         polygon (shapely.geometry.Polygon): The polygon for which to compute the axes.
@@ -539,7 +540,8 @@ def get_parallel_major_axes(polygon, extension_factor=100, shift_ratio=0.4):
         shift_ratio (float): Fraction of the polygon's width along the minor axis to shift.
 
     Returns:
-        tuple: Two shapely.geometry.LineString objects representing the left-shifted and right-shifted major axes.
+        tuple: Two shapely.geometry.LineString objects representing the parallel major axes,
+               sorted such that the first line is further left (smaller average x) than the second.
     """
     # Get the exterior coordinates (exclude the duplicate last point)
     x, y = polygon.exterior.xy
@@ -583,4 +585,8 @@ def get_parallel_major_axes(polygon, extension_factor=100, shift_ratio=0.4):
     left_line = LineString([left_line_start, left_line_end])
     right_line = LineString([right_line_start, right_line_end])
 
-    return left_line, right_line
+    # Sort the lines by the average x coordinate of their endpoints (from left to right)
+    lines = [left_line, right_line]
+    lines.sort(key=lambda line: np.mean([pt[0] for pt in line.coords]))
+
+    return tuple(lines)
